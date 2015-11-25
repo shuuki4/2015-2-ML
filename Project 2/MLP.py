@@ -48,8 +48,13 @@ class MLP(object) :
 
 		# maxout, softmax
 		self.hidden = T.maximum(hid1, T.maximum(hid2, hid3))
-		self.output = T.nnet.softmax(T.dot(self.hidden, self.W2*select_array2)+self.b2*select_vec2)
+		#self.output = T.nnet.softmax(T.dot(self.hidden, self.W2*select_array2)+self.b2*select_vec2)
+		x = T.dot(self.hidden, self.W2*select_array2)+self.b2*select_vec2
+		x_prime = x - x.max(axis=1, keepdims=True)
+		x_prime2 = x_prime - T.log(T.sum(T.exp(x_prime),axis=1,keepdims=True))
+		self.output = T.exp(x_prime2)
 
 		# save parameter of this layer for back-prop convinience
 		self.params = [self.W2, self.b2, self.W11, self.W12, self.W13, self.b11, self.b12, self.b13]
 		self.paramins = [hidden_num, hidden_num, input_num, input_num, input_num, input_num, input_num, input_num]
+		self.input = input

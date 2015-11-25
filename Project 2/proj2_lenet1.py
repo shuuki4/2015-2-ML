@@ -3,11 +3,13 @@ import theano
 import theano.tensor as T
 import tarfile
 import cPickle
+import pickle
 import gzip
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import time
 import math
+import random
 
 import ConvLayer
 import PoolLayer
@@ -55,16 +57,17 @@ test_num = 10000
 
 # other variables
 mini_batch_size = 50
-learning_rate = 0.03 # TODO : adaptive 
+learning_rate = 0.05 # TODO : adaptive 
+weight_decay = 0.0001
 # input_shape determined
-input_shape = (mini_batch_size, 3, 32, 32)
+input_shape = (mini_batch_size, 3, 24, 24)
 
 # start time record
 start_time = time.time()
 
 # log
 print "Starting to fetch data... %f" % (time.time()-start_time)
-
+"""
 # data fetch from tar.gz file
 fo = tarfile.open("cifar-10-python.tar.gz", 'r:gz')
 for i in range(1, 7) :
@@ -142,6 +145,19 @@ for j in range(3) :
 		flat = test_data[i,j,:,:].reshape(1024, 1)
 		test_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
 
+# print test
+for i in range(10) :
+	max = np.amax(val_data[i,:,:,:])
+	min = np.amin(val_data[i,:,:,:])
+	test = np.asarray((val_data[i,:,:,:]-min)/(max-min) * 255.0 , dtype=np.uint8)
+
+	plt.imshow(test.transpose(1,2,0))
+	plt.show()
+"""
+
+f = open('preprocessed.txt', 'rb')
+train_data, train_label, val_data, val_label, test_data, test_label = pickle.load(f)
+f.close()
 
 # log
 print "Building Layer Structure... %f" % (time.time()-start_time)
@@ -156,47 +172,48 @@ test_input = T.tensor4(name='test_input')
 ###layer construction : conv->pool->conv->pool->mlp
 """
 # Conv, Pool layers
-convlayer1 = ConvLayer.ConvLayer(input, input_shape, filter_shape=(4, 3, 3, 3)) # use 3*3 for convolution filter
-poollayer1 = PoolLayer.PoolLayer(convlayer1.output, input_shape=(mini_batch_size, 4, 30, 30), pool_shape=(2, 2)) # use 2*2 for pool filter
-convlayer2 = ConvLayer.ConvLayer(poollayer1.output, input_shape=(mini_batch_size, 4, 15, 15), filter_shape=(6, 4, 4, 4))
-poollayer2 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size, 6, 12, 12), pool_shape=(2, 2))
-convlayer3 = ConvLayer.ConvLayer(poollayer2.output, input_shape=(mini_batch_size, 6, 6, 6), filter_shape=(8, 6, 3, 3))
+convlayer1 = ConvLayer.ConvLayer(input, input_shape, filter_shape=(16, 3, 5, 5)) # use 3*3 for convolution filter
+poollayer1 = PoolLayer.PoolLayer(convlayer1.output, input_shape=(mini_batch_size, 16, 20, 20), pool_shape=(2, 2)) # use 2*2 for pool filter
+convlayer2 = ConvLayer.ConvLayer(poollayer1.output, input_shape=(mini_batch_size, 16, 10, 10), filter_shape=(32, 16, 3, 3))
+poollayer2 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size, 32, 8, 8), pool_shape=(2, 2))
 
 # After these layers : 8 channels * (4*4) values per image
 # use these variables to construct MLP
-debug_img = theano.shared(np.asarray((mini_batch_size, 8, 4, 4)))
-mlp_input = T.reshape(convlayer3.output, (mini_batch_size, 8*4*4), ndim=2)
-MLPlayer = MLP.MLP(mlp_input, input_shape=(mini_batch_size, 8*4*4), hidden_num=100, output_num=10)
+# debug_img = theano.shared(np.asarray((mini_batch_size, 8, 4, 4)))
+mlp_input = T.reshape(poollayer2.output, (mini_batch_size, 32*4*4), ndim=2)
+MLPlayer = MLP.MLP(mlp_input, input_shape=(mini_batch_size, 32*4*4), hidden_num=1400, output_num=10, p=0.5)
 """
 # deep, deep layer with dropout
 convlayer1 = ConvLayer.ConvLayer(input, input_shape, filter_shape=(64, 3, 3, 3))
-convlayer2 = ConvLayer.ConvLayer(convlayer1.output, input_shape=(mini_batch_size, 64, 30, 30), filter_shape=(64, 64, 3, 3))
-poollayer1 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size, 64, 28, 28), pool_shape=(2,2))
-dropout1 = Dropout.Dropout(poollayer1.output, input_shape=(mini_batch_size, 64, 14, 14), p=0.25)
-convlayer3 = ConvLayer.ConvLayer(dropout1.output, input_shape=(mini_batch_size, 64, 14, 14), filter_shape=(128, 64, 3, 3))
-convlayer4 = ConvLayer.ConvLayer(convlayer3.output, input_shape=(mini_batch_size, 128, 12, 12), filter_shape=(128, 128, 3, 3))
-poollayer2 = PoolLayer.PoolLayer(convlayer4.output, input_shape=(mini_batch_size, 128, 10, 10), pool_shape=(2,2))
-dropout2 = Dropout.Dropout(poollayer2.output, input_shape=(mini_batch_size, 128, 5, 5), p=0.25)
-convlayer5 = ConvLayer.ConvLayer(dropout2.output, input_shape=(mini_batch_size, 128, 5, 5), filter_shape=(256, 128, 3, 3))
-convlayer6 = ConvLayer.ConvLayer(convlayer5.output, input_shape=(mini_batch_size, 256, 3, 3), filter_shape=(256, 256, 3, 3))
+convlayer2 = ConvLayer.ConvLayer(convlayer1.output, input_shape=(mini_batch_size, 64, 22, 22), filter_shape=(64, 64, 3, 3))
+poollayer1 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size, 64, 20, 20), pool_shape=(2,2))
+dropout1 = Dropout.Dropout(poollayer1.output, input_shape=(mini_batch_size, 64, 10, 10), p=0.25)
+convlayer3 = ConvLayer.ConvLayer(dropout1.output, input_shape=(mini_batch_size, 64, 10, 10), filter_shape=(128, 64, 3, 3))
+poollayer2 = PoolLayer.PoolLayer(convlayer3.output, input_shape=(mini_batch_size, 128, 8, 8), pool_shape=(2,2))
+dropout2 = Dropout.Dropout(poollayer2.output, input_shape=(mini_batch_size, 128, 4, 4), p=0.25)
+convlayer5 = ConvLayer.ConvLayer(dropout2.output, input_shape=(mini_batch_size, 128, 4, 4), filter_shape=(256, 128, 3, 3))
 
-mlp_input = T.reshape(convlayer6.output, (mini_batch_size, 256*1*1), ndim=2)
-MLPlayer = MLP.MLP(mlp_input, input_shape=(mini_batch_size, 256*1*1), hidden_num=200, output_num=10, p=0.3)
+mlp_input = T.reshape(convlayer5.output, (mini_batch_size, 256*2*2), ndim=2)
+MLPlayer = MLP.MLP(mlp_input, input_shape=(mini_batch_size, 256*2*2), hidden_num=700, output_num=10, p=0.5)
+
 
 # After these layers : mini_batch_size * 10 tensor generated
 # use 'cross-entropy' as a cost function
-y = T.matrix(name='y') # real one-hot result
+y = T.matrix('y') # real one-hot indexes
 cost = T.nnet.categorical_crossentropy(MLPlayer.output, y).sum()
 
 # gradient calculation
-params = MLPlayer.params + convlayer6.params + convlayer5.params + convlayer4.params + convlayer3.params + convlayer2.params + convlayer1.params
-paramins = MLPlayer.paramins + convlayer6.paramins + convlayer5.paramins + convlayer4.paramins + convlayer3.paramins + convlayer2.paramins + convlayer1.paramins
+params = MLPlayer.params + convlayer5.params + convlayer3.params + convlayer2.params + convlayer1.params
+paramins = MLPlayer.paramins + convlayer5.paramins + convlayer3.paramins + convlayer2.paramins + convlayer1.paramins
+#params = MLPlayer.params + convlayer2.params + convlayer1.params
+#paramins = MLPlayer.paramins + convlayer2.paramins + convlayer1.paramins
 grad = T.grad(cost, params)
 #updates= [(param_i, param_i-learning_rate*grad_i) for param_i, grad_i in zip(params, grad)]
 
 # momentum learning
-momentum = 0.5
+momentum = 0.2
 updates = []
+
 for param_i, grad_i, in_i in zip(params, grad, paramins) :
 	prev_grad_i = theano.shared(np.zeros(param_i.get_value().shape, dtype=theano.config.floatX))
 	nowgrad = momentum * prev_grad_i - learning_rate * grad_i / math.sqrt(in_i)
@@ -206,15 +223,16 @@ for param_i, grad_i, in_i in zip(params, grad, paramins) :
 # functions
 f = theano.function([input, y], cost, updates=updates) # for train
 test_f = theano.function([input], MLPlayer.output) # for validation, test
-#debug_f = theano.function([input], [MLPlayer.hidden, MLPlayer.output]) # for debug
+debug_f = theano.function([input], [MLPlayer.input, MLPlayer.hidden, MLPlayer.output]) # for debug
 
 #### Training Region ####
 
 # parameters
-max_iter = 32000 # one cycle = 800 times
+max_iter = 56000 # one cycle = 800 times
 
 # log
 # print "Start Training... %f" % (time.time()-start_time)
+
 
 for loop in range(max_iter) :
 	"""
@@ -224,20 +242,30 @@ for loop in range(max_iter) :
 	# log
 	print "Loop #%d... " % (loop+1)
 	"""
-	# fetch appropriate 'mini_batch_size' training datas
+	if (loop*mini_batch_size)%train_num==0 :
+		random_idx = np.random.permutation(train_num)
+
+	# fetch appropriate 'mini_batch_size' training datas : randomly
 	startidx = (loop*mini_batch_size)%train_num
-	nowinput = train_data[startidx:startidx+mini_batch_size, :, :, :]
+	#nowinput = train_data[random_idx[startidx:startidx+mini_batch_size], :, :, :]
+	nowinput = np.zeros((mini_batch_size, 3, 24, 24), dtype=theano.config.floatX)
+	for i in range(mini_batch_size) :
+		# take random 24x24 crop of image
+		x_st = random.randrange(0, 9)
+		y_st = random.randrange(0, 9)
+		nowinput[i,:,:,:] = train_data[random_idx[startidx+i],:,x_st:x_st+24,y_st:y_st+24]
+
 	# make y data for this loop
 	nowy = np.zeros((mini_batch_size, 10), dtype=theano.config.floatX)
 	for idx in range(mini_batch_size) :
-		nowy[idx, train_label[startidx+idx]]=1.0
+		nowy[idx, train_label[random_idx[startidx+idx]]]=1.0
 	# proceed!
 	#Ww, Bb = convlayer1.W.get_value(), convlayer1.b.get_value()
 	nowcost = f(nowinput, nowy)
 	#print Ww[:, :, :]
 	#print Bb[:]
 	#print "Now cost : %f" % (nowcost)
-
+	
 	# check validation data error rate
 	if loop%200==0 and loop>0:
 		print "Validation Data Check for Loop %d !" % loop
@@ -245,24 +273,44 @@ for loop in range(max_iter) :
 		errorcnt = 0.0
 		for i in range(check_valnum/mini_batch_size) :
 			check_startidx = (i*mini_batch_size)%check_valnum
-			check_nowinput = val_data[check_startidx:check_startidx+mini_batch_size, :, :, :]
+			check_nowinput = val_data[check_startidx:check_startidx+mini_batch_size, :, 4:28, 4:28]
 			result = test_f(check_nowinput).argmax(axis=1)
 			#print test_f(check_nowinput)
 			for j in range(mini_batch_size) :
 				if result[j] != val_label[check_startidx+j] :
 					errorcnt += 1.0
+			"""
+			if i==0 :
+				in_, hid_, out_ = debug_f(check_nowinput)
+				print in_[0,:]
+				print hid_[0,:]
+				print out_[0:5,:]
+				print val_label[check_startidx:check_startidx+5]
+			"""
 		print "Error Rate : %f" % (errorcnt/check_valnum)
-
+	
 	# learning_rate drop
-	if loop%4000==0 and loop>0 :
-		learning_rate *= 0.7
+	if loop%4000==0 and loop>=4000 and loop<=36000 :
+		learning_rate *= 0.6
+
+	if loop%8000==0 and loop>0 :
+		errorcnt = 0.0
+		print "Test Data Check for Loop %d !" % loop
+		for i in range(test_num/mini_batch_size) :
+			startidx = (i*mini_batch_size)%test_num
+			nowinput = test_data[startidx:startidx+mini_batch_size, :, 4:28, 4:28]
+			result = test_f(nowinput).argmax(axis=1)
+			for j in range(mini_batch_size) :
+				if result[j] != test_label[startidx+j] :
+					errorcnt += 1.0
+		print "Test Data Error Rate : %f" % (errorcnt/test_num)
 
 # final check : test data
 print "Test Data!!!"
 errorcnt = 0.0
 for i in range(test_num/mini_batch_size) :
 	startidx = (i*mini_batch_size)%test_num
-	nowinput = test_data[startidx:startidx+mini_batch_size, :, :, :]
+	nowinput = test_data[startidx:startidx+mini_batch_size, :, 4:28, 4:28]
 	result = test_f(nowinput).argmax(axis=1)
 	for j in range(mini_batch_size) :
 		if result[j] != test_label[startidx+j] :
