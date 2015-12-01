@@ -10,6 +10,7 @@ import matplotlib.cm as cm
 import time
 import math
 import random
+from skimage import transform, exposure
 
 import ConvLayer
 import PoolLayer
@@ -34,6 +35,36 @@ def load(fo, filenameidx) :
 
 	return cPickle.load(fo.extractfile(filenamestr))
 
+# function that generates random augmentation data
+def image_generate(img, ZCA_array) :
+	timg = np.copy(img)
+	timg = timg.transpose(1, 2, 0) # transpose to use skimage
+	augnum = random.randrange(0, 5)
+	
+	if augnum==0 or augnum==1 : 
+		# change nothing
+		pass
+	elif augnum==2 :
+		# horizontal flip 
+		for j in range(3) :
+			timg[:,:,j] = np.fliplr(timg[:,:,j])
+	elif augnum==3 :
+		# random rotation of -15~15 degrees
+		angle = random.random()*30-15
+		timg = transform.rotate(timg/256.0, angle)
+	elif augnum==4 :
+		# gamma correction (luminance adjust) - random gamma 0.7~1.3
+		gamma = random.random()*0.6+0.7
+		timg = exposure.adjust_gamma(timg/256.0, gamma)
+
+	timg = timg.transpose(2, 0, 1)
+	# GCN, ZCA
+	for i in range(3) :
+		timg[i,:,:] -= np.mean(timg[i,:,:])
+		timg[i,:,:] /= np.std(timg[i,:,:])
+		timg[i,:,:] = np.dot(ZCA_array, timg[i,:,:].reshape(1024, 1)).reshape(32, 32)
+
+	return timg
 
 ######################################################################################
 ##########							REAL RUN AREA					##################
@@ -67,7 +98,7 @@ start_time = time.time()
 
 # log
 print "Starting to fetch data... %f" % (time.time()-start_time)
-"""
+
 # data fetch from tar.gz file
 fo = tarfile.open("cifar-10-python.tar.gz", 'r:gz')
 for i in range(1, 7) :
@@ -94,76 +125,35 @@ train_data = np.asarray(train_data, dtype=theano.config.floatX)
 val_data = np.asarray(val_data, dtype=theano.config.floatX)
 test_data = np.asarray(test_data, dtype=theano.config.floatX)
 
-corr_array = np.zeros((3, 1024, 1024))
+f = open('ZCAarray.txt', 'rb')
+ZCA_array = pickle.load(f)
+f.close()
 
-# GCN, ZCA
-for i in range(train_num) :
-	if i%1000 == 0 : print "Transforming %d" % (i+1)
-	for j in range(3) :
-		original_array = train_data[i,j,:,:]
-		# GCN
-		original_array = np.add(original_array, -np.mean(original_array))
-		gcn_array = (original_array / np.std(original_array))
-		train_data[i, j, :, :] = gcn_array #np.dot(ZCA_array, gcn_array)
-
-		# prepare for ZCA
-		flat = gcn_array.reshape(1024, 1)
-		corr_array[j,:,:] += np.dot(flat, flat.T)
-
+# GCN and ZCA for val, test data
 for i in range(val_num) :
-	if i%1000 == 0 : print "Transforming %d" % (i+1)
 	for j in range(3) :
 		original_array = val_data[i,j,:,:]
 		# GCN
 		original_array = np.add(original_array, -np.mean(original_array))
 		gcn_array = (original_array / np.std(original_array))
-		val_data[i, j, :, :] = gcn_array #np.dot(ZCA_array, gcn_array)
+		val_data[i, j, :, :] = gcn_array
+		flat = val_data[i,j,:,:].reshape(1024, 1)
+		val_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
 
 for i in range(test_num) :
-	if i%1000 == 0 : print "Transforming %d" % (i+1)
 	for j in range(3) :
 		original_array = test_data[i,j,:,:]
 		# GCN
 		original_array = np.add(original_array, -np.mean(original_array))
 		gcn_array = (original_array / np.std(original_array))
 		test_data[i, j, :, :] = gcn_array #np.dot(ZCA_array, gcn_array)
-
-# svd & zca
-epsilon = 0.001
-corr_array /= train_num
-for j in range(3) :
-	print "SVD of filter %d.." % (j+1)
-	U, s, V = np.linalg.svd(corr_array[j,:,:])
-	ZCA_array = np.dot(np.dot(U, np.diagflat(np.diag(1.0/np.sqrt(np.diag(s)+epsilon)))), U.T)
-	for i in range(train_num) :
-		flat = train_data[i,j,:,:].reshape(1024, 1)
-		train_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
-	for i in range(val_num) :
-		flat = val_data[i,j,:,:].reshape(1024, 1)
-		val_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
-	for i in range(test_num) :
 		flat = test_data[i,j,:,:].reshape(1024, 1)
 		test_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
-
-# print test
-for i in range(10) :
-	max = np.amax(val_data[i,:,:,:])
-	min = np.amin(val_data[i,:,:,:])
-	test = np.asarray((val_data[i,:,:,:]-min)/(max-min) * 255.0 , dtype=np.uint8)
-
-	plt.imshow(test.transpose(1,2,0))
-	plt.show()
-"""
-
-f = open('preprocessed.txt', 'rb')
-train_data, train_label, val_data, val_label, test_data, test_label = pickle.load(f)
-f.close()
 
 # log
 print "Building Layer Structure... %f" % (time.time()-start_time)
 
-## build layer structure : LeNet model
-# Input (3 channel) -> Conv (4 channel) -> Max-Pool -> Conv (6 channel) -> Max-Pool -> MLP
+## build layer structure 
 
 # input symbol variable
 input = T.tensor4(name='input')
@@ -183,19 +173,21 @@ poollayer2 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size
 mlp_input = T.reshape(poollayer2.output, (mini_batch_size, 32*4*4), ndim=2)
 MLPlayer = MLP.MLP(mlp_input, input_shape=(mini_batch_size, 32*4*4), hidden_num=1400, output_num=10, p=0.5)
 """
+
 # deep, deep layer with dropout
-convlayer1 = ConvLayer.ConvLayer(input, input_shape, filter_shape=(64, 3, 3, 3))
-convlayer2 = ConvLayer.ConvLayer(convlayer1.output, input_shape=(mini_batch_size, 64, 22, 22), filter_shape=(64, 64, 3, 3))
-poollayer1 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size, 64, 20, 20), pool_shape=(2,2))
-dropout1 = Dropout.Dropout(poollayer1.output, input_shape=(mini_batch_size, 64, 10, 10), p=0.25)
-convlayer3 = ConvLayer.ConvLayer(dropout1.output, input_shape=(mini_batch_size, 64, 10, 10), filter_shape=(128, 64, 3, 3))
-poollayer2 = PoolLayer.PoolLayer(convlayer3.output, input_shape=(mini_batch_size, 128, 8, 8), pool_shape=(2,2))
-dropout2 = Dropout.Dropout(poollayer2.output, input_shape=(mini_batch_size, 128, 4, 4), p=0.25)
-convlayer5 = ConvLayer.ConvLayer(dropout2.output, input_shape=(mini_batch_size, 128, 4, 4), filter_shape=(256, 128, 3, 3))
+convlayer1 = ConvLayer.ConvLayer(input, input_shape, filter_shape=(64, 3, 3, 3), border_mode="full")
+convlayer2 = ConvLayer.ConvLayer(convlayer1.output, input_shape=(mini_batch_size, 64, 26, 26), filter_shape=(64, 64, 3, 3))
+poollayer1 = PoolLayer.PoolLayer(convlayer2.output, input_shape=(mini_batch_size, 64, 24, 24), pool_shape=(2,2))
+dropout1 = Dropout.Dropout(poollayer1.output, input_shape=(mini_batch_size, 64, 12, 12), p=0.25)
+convlayer3 = ConvLayer.ConvLayer(dropout1.output, input_shape=(mini_batch_size, 64, 12, 12), filter_shape=(128, 64, 3, 3), border_mode="full")
+convlayer4 = ConvLayer.ConvLayer(convlayer3.output, input_shape=(mini_batch_size, 128, 14, 14), filter_shape=(128, 128, 3, 3))
+poollayer2 = PoolLayer.PoolLayer(convlayer4.output, input_shape=(mini_batch_size, 128, 12, 12), pool_shape=(2,2))
+dropout2 = Dropout.Dropout(poollayer2.output, input_shape=(mini_batch_size, 128, 6, 6), p=0.25)
+convlayer5 = ConvLayer.ConvLayer(dropout2.output, input_shape=(mini_batch_size, 128, 6, 6), filter_shape=(256, 128, 3, 3))
+convlayer6 = ConvLayer.ConvLayer(convlayer5.output, input_shape=(mini_batch_size, 256, 4, 4), filter_shape=(256, 256, 3, 3))
 
-mlp_input = T.reshape(convlayer5.output, (mini_batch_size, 256*2*2), ndim=2)
+mlp_input = T.reshape(convlayer6.output, (mini_batch_size, 256*2*2), ndim=2)
 MLPlayer = MLP.MLP(mlp_input, input_shape=(mini_batch_size, 256*2*2), hidden_num=700, output_num=10, p=0.5)
-
 
 # After these layers : mini_batch_size * 10 tensor generated
 # use 'cross-entropy' as a cost function
@@ -203,8 +195,8 @@ y = T.matrix('y') # real one-hot indexes
 cost = T.nnet.categorical_crossentropy(MLPlayer.output, y).sum()
 
 # gradient calculation
-params = MLPlayer.params + convlayer5.params + convlayer3.params + convlayer2.params + convlayer1.params
-paramins = MLPlayer.paramins + convlayer5.paramins + convlayer3.paramins + convlayer2.paramins + convlayer1.paramins
+params = MLPlayer.params + convlayer6.params + convlayer5.params + convlayer4.params + convlayer3.params + convlayer2.params + convlayer1.params
+paramins = MLPlayer.paramins + convlayer6.paramins + convlayer5.paramins + convlayer4.paramins + convlayer3.paramins + convlayer2.paramins + convlayer1.paramins
 #params = MLPlayer.params + convlayer2.params + convlayer1.params
 #paramins = MLPlayer.paramins + convlayer2.paramins + convlayer1.paramins
 grad = T.grad(cost, params)
@@ -228,11 +220,10 @@ debug_f = theano.function([input], [MLPlayer.input, MLPlayer.hidden, MLPlayer.ou
 #### Training Region ####
 
 # parameters
-max_iter = 56000 # one cycle = 800 times
+max_iter = 120000 # one cycle = 800 times
 
 # log
 # print "Start Training... %f" % (time.time()-start_time)
-
 
 for loop in range(max_iter) :
 	"""
@@ -253,7 +244,9 @@ for loop in range(max_iter) :
 		# take random 24x24 crop of image
 		x_st = random.randrange(0, 9)
 		y_st = random.randrange(0, 9)
-		nowinput[i,:,:,:] = train_data[random_idx[startidx+i],:,x_st:x_st+24,y_st:y_st+24]
+		# random augmentation
+		#nowinput[i,:,:,:] = train_data[random_idx[startidx+i],:,x_st:x_st+24,y_st:y_st+24]
+		nowinput[i,:,:,:] = image_generate(train_data[random_idx[startidx+i],:,:,:], ZCA_array)[:,x_st:x_st+24,y_st:y_st+24]
 
 	# make y data for this loop
 	nowy = np.zeros((mini_batch_size, 10), dtype=theano.config.floatX)
@@ -267,7 +260,7 @@ for loop in range(max_iter) :
 	#print "Now cost : %f" % (nowcost)
 	
 	# check validation data error rate
-	if loop%200==0 and loop>0:
+	if loop%400==0 and loop>0:
 		print "Validation Data Check for Loop %d !" % loop
 		check_valnum = 5000
 		errorcnt = 0.0
@@ -292,27 +285,61 @@ for loop in range(max_iter) :
 	# learning_rate drop
 	if loop%4000==0 and loop>=4000 and loop<=36000 :
 		learning_rate *= 0.6
-
+	
 	if loop%8000==0 and loop>0 :
 		errorcnt = 0.0
+		conf_matrix = np.zeros((10, 10), dtype=int)
 		print "Test Data Check for Loop %d !" % loop
 		for i in range(test_num/mini_batch_size) :
 			startidx = (i*mini_batch_size)%test_num
+			result = np.zeros((mini_batch_size, 5), dtype=int)
+
 			nowinput = test_data[startidx:startidx+mini_batch_size, :, 4:28, 4:28]
-			result = test_f(nowinput).argmax(axis=1)
+			result[:,0] = test_f(nowinput).argmax(axis=1)
+			nowinput = test_data[startidx:startidx+mini_batch_size, :, 0:24, 0:24]
+			result[:,1] = test_f(nowinput).argmax(axis=1)
+			nowinput = test_data[startidx:startidx+mini_batch_size, :, 0:24, 8:32]
+			result[:,2] = test_f(nowinput).argmax(axis=1)
+			nowinput = test_data[startidx:startidx+mini_batch_size, :, 8:32, 0:24]
+			result[:,3] = test_f(nowinput).argmax(axis=1)
+			nowinput = test_data[startidx:startidx+mini_batch_size, :, 8:32, 8:32]
+			result[:,4] = test_f(nowinput).argmax(axis=1)
+
 			for j in range(mini_batch_size) :
-				if result[j] != test_label[startidx+j] :
+				vote = np.bincount(result[j,:]).argmax()
+				if vote != test_label[startidx+j] :
 					errorcnt += 1.0
+				conf_matrix[test_label[startidx+j], vote]+=1
+
 		print "Test Data Error Rate : %f" % (errorcnt/test_num)
+		print "Confusion Matrix : "
+		print conf_matrix		
 
 # final check : test data
 print "Test Data!!!"
 errorcnt = 0.0
+conf_matrix = np.zeros((10,10), dtype=int)
 for i in range(test_num/mini_batch_size) :
 	startidx = (i*mini_batch_size)%test_num
+	result = np.zeros((mini_batch_size, 5), dtype=int)
+
 	nowinput = test_data[startidx:startidx+mini_batch_size, :, 4:28, 4:28]
-	result = test_f(nowinput).argmax(axis=1)
+	result[:,0] = test_f(nowinput).argmax(axis=1)
+	nowinput = test_data[startidx:startidx+mini_batch_size, :, 0:24, 0:24]
+	result[:,1] = test_f(nowinput).argmax(axis=1)
+	nowinput = test_data[startidx:startidx+mini_batch_size, :, 0:24, 8:32]
+	result[:,2] = test_f(nowinput).argmax(axis=1)
+	nowinput = test_data[startidx:startidx+mini_batch_size, :, 8:32, 0:24]
+	result[:,3] = test_f(nowinput).argmax(axis=1)
+	nowinput = test_data[startidx:startidx+mini_batch_size, :, 8:32, 8:32]
+	result[:,4] = test_f(nowinput).argmax(axis=1)
+
 	for j in range(mini_batch_size) :
-		if result[j] != test_label[startidx+j] :
+		vote = np.bincount(result[j,:]).argmax()
+		if vote != test_label[startidx+j] :
 			errorcnt += 1.0
+		conf_matrix[test_label[startidx+j], vote]+=1
+
 print "Test Data Error Rate : %f" % (errorcnt/test_num)
+print "Confusion Matrix : "
+print conf_matrix

@@ -7,6 +7,7 @@ import gzip
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import time
+import random
 
 def load(fo, filenameidx) :
 	filenamestr = 'cifar-10-batches-py/'
@@ -110,11 +111,19 @@ for j in range(3) :
 		train_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
 
 # print test
-for i in range(10) :
-	max = np.amax(train_data[i,:,:,:])
-	min = np.amin(train_data[i,:,:,:])
-	test = np.asarray((train_data[i,:,:,:]-min)/(max-min) * 255.0 , dtype=np.uint8)
+for i in range(5) :
+	for j in range(3) :
+		array = train_data[i,:,:,:]
+		if j==1 :
+			for k in range(3) :
+				array[k,:,:] = np.fliplr(array[k,:,:])
+		elif j==2 :
+			array += (random.random()*2-1)
 
-	plt.imshow(test.transpose(1,2,0))
-	plt.show()
+		max = np.amax(array)
+		min = np.amin(array)
+		test = np.asarray((array-min)/(max-min) * 255.0 , dtype=np.uint8)
+
+		plt.imshow(test.transpose(1,2,0))
+		plt.show()
 

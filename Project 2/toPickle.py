@@ -4,6 +4,7 @@ import tarfile
 import gzip
 import numpy as np
 import theano
+from skimage import data
 
 def load(fo, filenameidx) :
 	filenamestr = 'cifar-10-batches-py/'
@@ -21,6 +22,7 @@ def load(fo, filenameidx) :
 		filenamestr += 'test_batch'
 
 	return cPickle.load(fo.extractfile(filenamestr))
+	
 
 train_data = np.empty(shape=(0,0))
 train_label = np.empty(shape=(0,))
@@ -92,6 +94,10 @@ for i in range(val_num) :
 		gcn_array = (original_array / np.std(original_array))
 		val_data[i, j, :, :] = gcn_array #np.dot(ZCA_array, gcn_array)
 
+		# prepare for ZCA
+		flat = gcn_array.reshape(1024, 1)
+		corr_array[j,:,:] += np.dot(flat, flat.T)
+
 for i in range(test_num) :
 	if i%1000 == 0 : print "Transforming %d" % (i+1)
 	for j in range(3) :
@@ -103,11 +109,12 @@ for i in range(test_num) :
 
 # svd & zca
 epsilon = 0.001
-corr_array /= train_num
+corr_array /= (train_num+val_num)
 for j in range(3) :
 	print "SVD of filter %d.." % (j+1)
 	U, s, V = np.linalg.svd(corr_array[j,:,:])
 	ZCA_array = np.dot(np.dot(U, np.diagflat(np.diag(1.0/np.sqrt(np.diag(s)+epsilon)))), U.T)
+	"""
 	for i in range(train_num) :
 		flat = train_data[i,j,:,:].reshape(1024, 1)
 		train_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
@@ -117,7 +124,16 @@ for j in range(3) :
 	for i in range(test_num) :
 		flat = test_data[i,j,:,:].reshape(1024, 1)
 		test_data[i,j,:,:] = np.dot(ZCA_array, flat).reshape(32, 32)
+	"""
 
+"""
 f = open('preprocessed.txt', 'wb')
 pickle.dump([train_data, train_label, val_data, val_label, test_data, test_label], f)
+f.close()
+"""
+
+
+
+f = open('ZCAarray.txt', 'wb')
+pickle.dump(ZCA_array, f)
 f.close()

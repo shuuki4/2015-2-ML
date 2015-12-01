@@ -8,7 +8,7 @@ import math
 # define convolution layer for CNN (only convolution)
 
 class ConvLayer(object) :
-	def __init__(self, input, input_shape, filter_shape) :
+	def __init__(self, input, input_shape, filter_shape, border_mode="valid") :
 		# input : theano symbolic variable of input, 4D tensor
 		# input_shape : shape of input / (minibatch size, input channel num, image height, image width)
 		# filter_shape : shape of filter / (# of new channels to make, input channel num, filter height, filter width)
@@ -30,9 +30,9 @@ class ConvLayer(object) :
 		#self.output = 1.7159*T.tanh((self.conv_out + self.b.dimshuffle('x', 0, 'x', 'x'))*(2.0/3.0))
 
 		# maxout : 3
-		out1 = conv.conv2d(input, self.W1, image_shape=input_shape, filter_shape=filter_shape) + self.b1.dimshuffle('x', 0, 'x', 'x')
-		out2 = conv.conv2d(input, self.W2, image_shape=input_shape, filter_shape=filter_shape) + self.b2.dimshuffle('x', 0, 'x', 'x')
-		out3 = conv.conv2d(input, self.W3, image_shape=input_shape, filter_shape=filter_shape) + self.b3.dimshuffle('x', 0, 'x', 'x')
+		out1 = conv.conv2d(input, self.W1, image_shape=input_shape, filter_shape=filter_shape, border_mode=border_mode) + self.b1.dimshuffle('x', 0, 'x', 'x')
+		out2 = conv.conv2d(input, self.W2, image_shape=input_shape, filter_shape=filter_shape, border_mode=border_mode) + self.b2.dimshuffle('x', 0, 'x', 'x')
+		out3 = conv.conv2d(input, self.W3, image_shape=input_shape, filter_shape=filter_shape, border_mode=border_mode) + self.b3.dimshuffle('x', 0, 'x', 'x')
 
 		self.output = T.maximum(out1, T.maximum(out2, out3))
 
